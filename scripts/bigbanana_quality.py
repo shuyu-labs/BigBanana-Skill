@@ -9,6 +9,7 @@ from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from bigbanana_project import normalize_script
+from bigbanana_visual import image_info, similarity
 
 def assess(project: Path) -> dict:
     checks = []
@@ -46,6 +47,15 @@ def assess(project: Path) -> dict:
         prompt = prompt_by_id.get(sid, {})
         check(f"{sid}.prompt", bool(prompt.get("start_frame_prompt") and prompt.get("video_prompt")), "start/video prompt")
         check(f"{sid}.frame", frame.is_file() and frame.stat().st_size > 0, str(frame))
+        if frame.exists():
+            info = image_info(frame)
+            check(f"{sid}.visual_valid", info.get("valid") and info.get("width", 0) >= 256 and info.get("height", 0) >= 256 and info.get("variance", 0) > 1, "frame must be readable, >=256px and not blank")
+            refs = []
+            for candidate in project.glob("character_*.png"):
+                refs.append(candidate)
+            if refs:
+                best = max(similarity(frame, ref) for ref in refs)
+                check(f"{sid}.identity_similarity", best >= 0.15, f"best character reference similarity={best}")
         check(f"{sid}.video", video.is_file() and video.stat().st_size > 0, str(video))
         if text: check(f"{sid}.audio", bool(audio and audio.stat().st_size > 0), "dialogue/narration requires audio")
     passed = sum(1 for c in checks if c["passed"])

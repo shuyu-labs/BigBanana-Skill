@@ -4,6 +4,8 @@ import sys
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
 from bigbanana_project import normalize_script, resolve_shot_refs
 from bigbanana_quality import assess
+from bigbanana_visual import image_info, similarity
+from PIL import Image
 
 class OfflineTests(unittest.TestCase):
     def test_normalize_and_resolve_refs(self):
@@ -21,5 +23,12 @@ class OfflineTests(unittest.TestCase):
         (root / "script.json").write_text(json.dumps(script), encoding="utf-8")
         (root / "shots.json").write_text(json.dumps({"shots": [{"shot_id":"S01","start_frame_prompt":"x","video_prompt":"y"}]}), encoding="utf-8")
         self.assertIn(assess(root)["grade"], {"warning", "fail"})
+
+    def test_visual_similarity_and_blank_detection(self):
+        root = Path(tempfile.mkdtemp())
+        Image.new("RGB", (256, 256), (120, 80, 40)).save(root / "a.png")
+        Image.new("RGB", (256, 256), (120, 80, 40)).save(root / "b.png")
+        self.assertTrue(image_info(root / "a.png")["valid"])
+        self.assertGreaterEqual(similarity(root / "a.png", root / "b.png"), 0.99)
 
 if __name__ == "__main__": unittest.main()

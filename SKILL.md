@@ -71,6 +71,7 @@ python <skill_dir>/scripts/antsk.py verify
 | 衣橱变体 | `python <skill_dir>/scripts/bigbanana_generate.py wardrobe-prompts --script script.json --out wardrobe.json` |
 | 统一 CLI | `python <skill_dir>/scripts/bigbanana.py workflow plan ...` |
 | MCP 离线工具 | `python <skill_dir>/scripts/bigbanana_mcp.py` |
+| 视觉质检/九宫格渲染 | `python <skill_dir>/scripts/bigbanana_visual.py inspect|compare|contact-sheet|grid|wardrobe` |
 
 生成结果均为本地文件；JSON 输出保存到项目工作目录，图片/视频/音频按镜头编号命名（如 `s01_start.png`、`s01.mp4`、`s01_vo.wav`）。
 
@@ -86,6 +87,8 @@ python <skill_dir>/scripts/antsk.py verify
 6. **质量与交付**：先运行 `bigbanana_quality.py assess` 检查缺失素材，再用 `bigbanana_export.py` 调用本机 ffmpeg 拼接镜头；向用户汇总文件清单。
 
 项目 JSON 使用 schema version 2：角色、场景、道具和镜头均有稳定 ID，镜头通过 ID 绑定参考图；旧版只含名称的脚本会在工作流启动时自动迁移。
+
+视觉质检依赖 Pillow（核心 API 生成仍保持标准库可运行）。`bigbanana_quality.py` 会检查图片可读性、分辨率和与角色参考图的感知相似度；九宫格和衣橱命令负责将提示词渲染成可供人工选择/复核的参考图。
 
 ## 一键工作流
 

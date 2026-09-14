@@ -9,6 +9,7 @@ COMMANDS = {
     "quality": "bigbanana_quality.py", "export": "bigbanana_export.py",
     "image": "bigbanana_image.py", "video": "bigbanana_video.py",
     "audio": "bigbanana_audio.py", "auth": "antsk.py",
+    "visual": "bigbanana_visual.py",
 }
 def main():
     # Forward subcommand help/options verbatim; argparse would otherwise

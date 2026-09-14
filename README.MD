@@ -43,6 +43,7 @@ BigBanana-Skill 是一套**面向 Agent 的影像生产技能包**。它以 `SKI
 | 九宫格构图方案 | `bigbanana_generate.py grid-prompts` |
 | 衣橱状态变体 | `bigbanana_generate.py wardrobe-prompts` |
 | 统一 CLI / MCP | `bigbanana.py` / `bigbanana_mcp.py` |
+| 视觉质量检查与渲染 | `bigbanana_visual.py` |
 
 **与 BigBanana 主程序的关系**：脚本的模型能力矩阵、提示词模板、轮询与重试策略均对齐 BigBanana 源码（`types/model.ts`、`services/ai/*`、`videoModelCapabilities.ts`），因此产出风格与主程序一致，但可脱离桌面端在任意 Agent 环境运行。
 
@@ -365,6 +366,17 @@ python scripts/bigbanana_export.py --project ./episode --out ./episode/master.mp
 python scripts/bigbanana_generate.py grid-prompts --script ./episode/script.json --shot S01 --out ./episode/grid_s01.json
 python scripts/bigbanana_generate.py wardrobe-prompts --script ./episode/script.json --out ./episode/wardrobe.json
 ```
+
+视觉复核：
+
+```bash
+python scripts/bigbanana_visual.py inspect --image ./episode/s01_start.png
+python scripts/bigbanana_visual.py compare --image ./episode/s01_start.png --ref ./episode/character_01_主角.png
+python scripts/bigbanana_visual.py grid --grid ./episode/grid_s01.json --out-dir ./episode/grid_s01
+python scripts/bigbanana_visual.py contact-sheet --images ./episode/grid_s01/*.png --out ./episode/grid_s01_contact.png
+```
+
+视觉质检依赖 Pillow；核心生成脚本仍不依赖第三方 Python 包。
 
 统一入口将原子脚本收敛到一个命令：
 
