@@ -215,6 +215,15 @@ video_prompt（视频动作提示词，用于图生视频模型）：
 剧本 JSON:
 {script}"""
 
+GRID_PROMPT = """你是漫剧分镜导演。为镜头 {shot_id} 设计九种明显不同的构图方案。
+每个 panel 必须包含 angle、shot_size、character_position、action_focus、composition_prompt。
+返回 JSON：{{"shot_id":"{shot_id}","panels":[...],"recommended_panels":[1,2]}}。
+剧本 JSON：{script}"""
+
+WARDROBE_PROMPT = """你是漫剧角色造型设计师。基于剧本角色，为每个角色设计可复用的衣橱状态变体。
+每个变体包含 character_name、name、story_usage、visual_changes、prompt，并继承角色脸型、发型和体态识别锚点。
+返回 JSON：{{"items":[...]}}。剧本 JSON：{script}"""
+
 
 def normalize_style(style: str) -> str:
     key = (style or "").strip().lower()
@@ -277,6 +286,18 @@ def cmd_shot_prompts(args: argparse.Namespace) -> int:
     write_json(args.out, payload)
     return 0
 
+def cmd_grid_prompts(args: argparse.Namespace) -> int:
+    script = read_script(args.script)
+    prompt = GRID_PROMPT.format(script=json.dumps(script, ensure_ascii=False), shot_id=args.shot)
+    write_json(args.out, chat_json(prompt, model=args.model, temperature=args.temperature, max_tokens=args.max_tokens))
+    return 0
+
+def cmd_wardrobe_prompts(args: argparse.Namespace) -> int:
+    script = read_script(args.script)
+    prompt = WARDROBE_PROMPT.format(script=json.dumps(script, ensure_ascii=False))
+    write_json(args.out, chat_json(prompt, model=args.model, temperature=args.temperature, max_tokens=args.max_tokens))
+    return 0
+
 
 def main() -> int:
     ensure_utf8_console()
@@ -312,6 +333,14 @@ def main() -> int:
     p_shot.add_argument("--script", required=True)
     add_model_flags(p_shot)
     p_shot.set_defaults(func=cmd_shot_prompts)
+
+    p_grid = sub.add_parser("grid-prompts", help="shot -> nine-grid composition prompts")
+    p_grid.add_argument("--script", required=True); p_grid.add_argument("--shot", required=True)
+    add_model_flags(p_grid); p_grid.set_defaults(func=cmd_grid_prompts)
+
+    p_wardrobe = sub.add_parser("wardrobe-prompts", help="script -> wardrobe/state variants")
+    p_wardrobe.add_argument("--script", required=True)
+    add_model_flags(p_wardrobe); p_wardrobe.set_defaults(func=cmd_wardrobe_prompts)
 
     args = parser.parse_args()
     try:

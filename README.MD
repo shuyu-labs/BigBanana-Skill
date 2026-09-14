@@ -38,6 +38,11 @@ BigBanana-Skill 是一套**面向 Agent 的影像生产技能包**。它以 `SKI
 | 用关键帧 + 动作提示词生成视频镜头 | `bigbanana_video.py` |
 | 生成旁白与对白配音 | `bigbanana_audio.py` |
 | 一条命令跑完整集漫剧 | `bigbanana_workflow.py` |
+| 检查项目完整性 | `bigbanana_quality.py` |
+| 拼接镜头成片 | `bigbanana_export.py` |
+| 九宫格构图方案 | `bigbanana_generate.py grid-prompts` |
+| 衣橱状态变体 | `bigbanana_generate.py wardrobe-prompts` |
+| 统一 CLI / MCP | `bigbanana.py` / `bigbanana_mcp.py` |
 
 **与 BigBanana 主程序的关系**：脚本的模型能力矩阵、提示词模板、轮询与重试策略均对齐 BigBanana 源码（`types/model.ts`、`services/ai/*`、`videoModelCapabilities.ts`），因此产出风格与主程序一致，但可脱离桌面端在任意 Agent 环境运行。
 
@@ -339,6 +344,36 @@ episode/
 ```
 
 `manifest.json` 让工作流可中断续跑：已存在且非空的产物会被跳过，不会重复计费。
+
+### 质量检查与导出
+
+工作流完成后，先执行离线检查（不会调用 API）：
+
+```bash
+python scripts/bigbanana_quality.py assess --project ./episode --out ./episode/quality.json
+```
+
+安装 ffmpeg 后可按 `s01.mp4`、`s02.mp4` 等镜头顺序导出成片：
+
+```bash
+python scripts/bigbanana_export.py --project ./episode --out ./episode/master.mp4
+```
+
+生成九宫格构图和衣橱变体提示词：
+
+```bash
+python scripts/bigbanana_generate.py grid-prompts --script ./episode/script.json --shot S01 --out ./episode/grid_s01.json
+python scripts/bigbanana_generate.py wardrobe-prompts --script ./episode/script.json --out ./episode/wardrobe.json
+```
+
+统一入口将原子脚本收敛到一个命令：
+
+```bash
+python scripts/bigbanana.py workflow plan --idea "..." --out-dir ./episode
+python scripts/bigbanana.py quality assess --project ./episode
+```
+
+项目脚本会自动迁移到 schema version 2，为角色、场景、道具和镜头补稳定 ID，并按 ID 解析镜头参考图。需要接入 Agent 时，可将 `bigbanana_mcp.py` 注册为 stdio MCP server；它提供项目规范化、离线质量检查和镜头引用解析工具。
 
 ---
 

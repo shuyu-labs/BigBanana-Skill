@@ -7,9 +7,11 @@ keyframes, videos and dubbing in one reproducible output directory.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -18,6 +20,7 @@ from bigbanana_generate import chat_json, normalize_style, read_script, write_js
 from bigbanana_image import generate_gemini, generate_openai
 from bigbanana_video import normalize_model, run_generate as run_video_generate
 from bigbanana_audio import generate_speech
+from bigbanana_project import normalize_script, resolve_shot_refs
 
 
 def _slug(value: str) -> str:
@@ -77,24 +80,35 @@ def run_workflow(args: argparse.Namespace) -> int:
         manifest = {}
     manifest.setdefault("assets", {})
     manifest.setdefault("shots", {})
+    manifest["schema_version"] = 2
+    manifest["models"] = {"chat": args.chat_model, "image": args.image_model, "video": args.video_model, "audio": args.audio_model}
 
     def save_manifest() -> None:
-        manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+        manifest["updated_at"] = datetime.now(timezone.utc).isoformat()
+        temporary = manifest_path.with_suffix(".tmp")
+        temporary.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+        temporary.replace(manifest_path)
 
     if args.script:
         script = read_script(args.script)
+    elif (out_dir / "script.json").exists():
+        script = read_script(str(out_dir / "script.json"))
     else:
         from bigbanana_generate import SCRIPT_PROMPT
         style = normalize_style(args.style)
         script = chat_json(SCRIPT_PROMPT.format(lang=args.lang, style_label=style,
                                                 duration=args.duration, idea=args.idea),
                            model=args.chat_model, max_tokens=args.max_tokens)
+    script = normalize_script(script)
+    manifest["input"] = {"idea": args.idea, "script": str(args.script) if args.script else None,
+                          "script_hash": hashlib.sha256(json.dumps(script, ensure_ascii=False, sort_keys=True).encode()).hexdigest()}
     (out_dir / "script.json").write_text(json.dumps(script, ensure_ascii=False, indent=2), encoding="utf-8")
     write_json(str(out_dir / "plan.json"), build_plan(script))
 
     asset_map: dict[str, str] = {}
     for kind in ("character", "scene", "prop"):
-        payload = _asset_prompt(script, kind, args.chat_model)
+        prompt_path = out_dir / f"{kind}_prompts.json"
+        payload = json.loads(prompt_path.read_text(encoding="utf-8")) if prompt_path.exists() else _asset_prompt(script, kind, args.chat_model)
         (out_dir / f"{kind}_prompts.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         for idx, item in enumerate(payload.get("items") or [], 1):
             name = str(item.get("name") or f"{kind}_{idx}")
@@ -103,10 +117,12 @@ def run_workflow(args: argparse.Namespace) -> int:
                 _generate_image(str(item.get("image_prompt") or name), path, args.image_model, [], args.aspect)
             asset_map[name] = str(path)
             manifest["assets"][name] = str(path)
+            manifest["assets"][str(item.get("id") or name)] = str(path)
             save_manifest()
 
     from bigbanana_generate import SHOT_PROMPT_PROMPT
-    shot_payload = chat_json(SHOT_PROMPT_PROMPT.format(
+    shot_path = out_dir / "shots.json"
+    shot_payload = json.loads(shot_path.read_text(encoding="utf-8")) if shot_path.exists() else chat_json(SHOT_PROMPT_PROMPT.format(
         script=json.dumps(script, ensure_ascii=False), style=normalize_style(script.get("style", "anime"))),
         model=args.chat_model, max_tokens=args.max_tokens)
     (out_dir / "shots.json").write_text(json.dumps(shot_payload, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -117,17 +133,24 @@ def run_workflow(args: argparse.Namespace) -> int:
         if args.max_shots and generated >= args.max_shots:
             break
         sid = str(shot.get("shot_id") or f"S{idx:02d}")
+        manifest["shots"].setdefault(sid, {})
+        manifest["shots"][sid]["status"] = "running"
+        save_manifest()
         prompt_item = next((x for x in shot_payload.get("shots", []) if x.get("shot_id") == sid), {})
         frame_prompt = prompt_item.get("start_frame_prompt") or shot.get("action") or sid
-        refs = []
-        for character in shot.get("characters") or []:
-            ref = _find_ref(asset_map, character)
+        refs = resolve_shot_refs(script, shot, out_dir)
+        # Keep legacy name-based resolution for older scripts and user-authored JSON.
+        if not refs:
+            refs = []
+        if not refs:
+            for character in shot.get("characters") or []:
+                ref = _find_ref(asset_map, character)
+                if ref: refs.append(ref)
+            ref = _find_ref(asset_map, shot.get("scene"))
             if ref: refs.append(ref)
-        ref = _find_ref(asset_map, shot.get("scene"))
-        if ref: refs.append(ref)
-        for prop in shot.get("props") or []:
-            ref = _find_ref(asset_map, prop)
-            if ref: refs.append(ref)
+            for prop in shot.get("props") or []:
+                ref = _find_ref(asset_map, prop)
+                if ref: refs.append(ref)
         frame = out_dir / f"{sid.lower()}_start.png"
         if not frame.exists() or frame.stat().st_size == 0:
             _generate_image(frame_prompt, frame, args.image_model, refs, args.aspect)
@@ -136,19 +159,25 @@ def run_workflow(args: argparse.Namespace) -> int:
         video_out = out_dir / f"{sid.lower()}.mp4"
         v = argparse.Namespace(prompt=video_prompt, out=str(video_out), model=args.video_model,
                                seconds=int(shot.get("duration_seconds") or 6), aspect=args.aspect,
-                               start=str(frame), end=None, ref=refs, annotation=[], quiet=args.quiet)
+                               start=str(frame), end=str(out_dir / f"{sid.lower()}_end.png") if (out_dir / f"{sid.lower()}_end.png").exists() else None, ref=refs, annotation=[], quiet=args.quiet)
         if not video_out.exists() or video_out.stat().st_size == 0:
             run_video_generate(v)
 
         text = str(shot.get("dialogue") or shot.get("narration") or "").strip()
         if text and not args.skip_audio:
             audio = out_dir / f"{sid.lower()}_vo.{args.audio_format}"
-            blob, _ = generate_speech(text, model=args.audio_model, voice=args.voice,
-                                      output_format=args.audio_format,
-                                      mode="dialogue" if shot.get("dialogue") else "narration")
+            # Check before calling the paid API.  Previously an existing audio
+            # file was still regenerated on every resume.
             if not audio.exists() or audio.stat().st_size == 0:
+                blob, _ = generate_speech(text, model=args.audio_model, voice=args.voice,
+                                          output_format=args.audio_format,
+                                          mode="dialogue" if shot.get("dialogue") else "narration")
                 audio.write_bytes(blob)
-        manifest["shots"][sid] = {"frame": str(frame), "video": str(video_out), "refs": refs}
+        manifest["shots"][sid] = {
+            "frame": str(frame), "video": str(video_out), "refs": refs,
+            "audio": str(audio) if text and not args.skip_audio else None,
+            "status": "completed"
+        }
         save_manifest()
         generated += 1
     print(f"Workflow complete: {generated} shot(s) -> {out_dir}")
@@ -192,11 +221,12 @@ def main() -> int:
                                    max_tokens=args.max_tokens)
             else:
                 raise AntskError("plan requires --idea or --script")
+            script = normalize_script(script)
             write_json(str(Path(args.out_dir) / "plan.json"), build_plan(script))
             write_json(str(Path(args.out_dir) / "script.json"), script)
             return 0
-        if not args.idea and not args.script:
-            raise AntskError("run requires --idea or --script")
+        if not args.idea and not args.script and not (Path(args.out_dir).expanduser() / "script.json").exists():
+            raise AntskError("run requires --idea, --script, or an existing out-dir/script.json")
         return run_workflow(args)
     except (AntskError, KeyboardInterrupt) as error:
         print(f"ERROR: {error}", file=sys.stderr)

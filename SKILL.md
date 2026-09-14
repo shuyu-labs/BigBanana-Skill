@@ -65,6 +65,12 @@ python <skill_dir>/scripts/antsk.py verify
 | 视频 | `python <skill_dir>/scripts/bigbanana_video.py generate --prompt "..." --out s1.mp4 --model sora-2 --start first.png --seconds 8` |
 | 语音 | `python <skill_dir>/scripts/bigbanana_audio.py generate --text "..." --out v1.wav --voice alloy --mode narration` |
 | 一键漫剧工作流 | `python <skill_dir>/scripts/bigbanana_workflow.py plan --idea "..." --out-dir ./episode` → review → `... run --idea "..." --out-dir ./episode --approve` |
+| 离线质量检查 | `python <skill_dir>/scripts/bigbanana_quality.py assess --project ./episode` |
+| 成片导出 | `python <skill_dir>/scripts/bigbanana_export.py --project ./episode --out ./episode/master.mp4` |
+| 九宫格构图 | `python <skill_dir>/scripts/bigbanana_generate.py grid-prompts --script script.json --shot S01 --out grid.json` |
+| 衣橱变体 | `python <skill_dir>/scripts/bigbanana_generate.py wardrobe-prompts --script script.json --out wardrobe.json` |
+| 统一 CLI | `python <skill_dir>/scripts/bigbanana.py workflow plan ...` |
+| MCP 离线工具 | `python <skill_dir>/scripts/bigbanana_mcp.py` |
 
 生成结果均为本地文件；JSON 输出保存到项目工作目录，图片/视频/音频按镜头编号命名（如 `s01_start.png`、`s01.mp4`、`s01_vo.wav`）。
 
@@ -77,7 +83,9 @@ python <skill_dir>/scripts/antsk.py verify
 3. **镜头设计**：`shot-prompts` 为每个镜头产出首帧图片提示词 + 视频动作提示词。首帧生成时带上该镜头涉及的角色定妆照、场景图、道具图作为参考。
 4. **视频生成**：用首帧（可选尾帧）+ 镜头视频提示词调 `bigbanana_video.py`。时长 4-15 秒/镜头，按叙事节奏拆分。
 5. **语音配音**：旁白用 `--mode narration`，对白用 `--mode dialogue`。默认音色 alloy。
-6. **交付**：向用户汇总文件清单与建议的拼接顺序；如需剪辑合成，提示可用 ffmpeg 拼接镜头与音轨（本技能不做剪辑）。
+6. **质量与交付**：先运行 `bigbanana_quality.py assess` 检查缺失素材，再用 `bigbanana_export.py` 调用本机 ffmpeg 拼接镜头；向用户汇总文件清单。
+
+项目 JSON 使用 schema version 2：角色、场景、道具和镜头均有稳定 ID，镜头通过 ID 绑定参考图；旧版只含名称的脚本会在工作流启动时自动迁移。
 
 ## 一键工作流
 
