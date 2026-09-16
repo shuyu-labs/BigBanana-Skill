@@ -65,9 +65,10 @@ python scripts/bigbanana_director.py direct --script script.json --source novel.
 # 质量报告 dialogueCoverage / beatCoverage / characterBindingRate 未达 100% 时，
 # 先按 continuityRisks 修复或重跑，不要带着缺口进入关键帧阶段
 
-# 九宫格和衣橱
+# 九宫格和衣橱（九宫格 = 一张网格图一次生成，选格后本地裁切，不逐格付费）
 python scripts/bigbanana_generate.py grid-prompts --script script.json --shot S01 --out grid_s01.json
-python scripts/bigbanana_visual.py grid --grid grid_s01.json --out-dir grid_s01
+python scripts/bigbanana_visual.py grid --grid grid_s01.json --out grid_s01/grid.png --ref char_ref.png
+python scripts/bigbanana_visual.py grid-crop --image grid_s01/grid.png --grid grid_s01.json --panels 2 5 --out-dir grid_s01/crops
 python scripts/bigbanana_generate.py wardrobe-prompts --script script.json --out wardrobe.json
 python scripts/bigbanana_visual.py wardrobe --wardrobe wardrobe.json --out-dir wardrobe_refs
 

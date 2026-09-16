@@ -111,4 +111,64 @@ class DirectorPipelineTests(unittest.TestCase):
         self.assertGreaterEqual(sum(counts), 4)
         self.assertGreaterEqual(counts[0], 2)
 
+
+class GridProtocolTests(unittest.TestCase):
+    """Nine-grid = ONE image containing all panels (mirrors AI-Director)."""
+
+    def test_resolve_grid_layout(self):
+        from bigbanana_generate import resolve_grid_layout
+        self.assertEqual((resolve_grid_layout(9)["rows"], resolve_grid_layout(9)["cols"]), (3, 3))
+        self.assertEqual((resolve_grid_layout(6, "16:9")["rows"], resolve_grid_layout(6, "16:9")["cols"]), (2, 3))
+        self.assertEqual((resolve_grid_layout(6, "9:16")["rows"], resolve_grid_layout(6, "9:16")["cols"]), (3, 2))
+        self.assertEqual((resolve_grid_layout(4)["rows"], resolve_grid_layout(4)["cols"]), (2, 2))
+        self.assertEqual(resolve_grid_layout(7)["panel_count"], 9)
+
+    def test_validate_grid_panels(self):
+        from bigbanana_generate import resolve_grid_layout, validate_grid_panels
+        layout = resolve_grid_layout(9)
+        good = {"panels": [{"index": i, "shot_size": "中景", "camera_angle": "平视", "description": "She walks"} for i in range(9)]}
+        self.assertEqual(len(validate_grid_panels(good, layout)), 9)
+        for bad in (
+            {"panels": good["panels"][:8]},
+            {"panels": good["panels"] + [good["panels"][0]]},
+            {"panels": [{"index": 0, "shot_size": "", "camera_angle": "平视", "description": "x"}] + good["panels"][1:]},
+            {"panels": [{"index": i, "shot_size": "中景", "camera_angle": "平视", "description": "x"} for i in [0, 0, 1, 2, 3, 4, 5, 6, 7]]},
+        ):
+            with self.assertRaises(ValueError):
+                validate_grid_panels(bad, layout)
+
+    def test_grid_image_prompt_is_single_sheet(self):
+        import re
+        from bigbanana_generate import resolve_grid_layout
+        from bigbanana_visual import build_grid_image_prompt
+        l9 = resolve_grid_layout(9)
+        payload = {"panel_count": 9, "rows": 3, "cols": 3, "grid_layout": "3x3", "positions": l9["positions"],
+                   "panels": [{"index": i, "shot_size": "中景", "camera_angle": "平视", "description": f"take {i}"} for i in range(9)]}
+        prompt = build_grid_image_prompt(payload, "3d-animation")
+        self.assertIn("Create ONE cinematic storyboard contact sheet", prompt)
+        self.assertIn("exactly 3 rows x 3 columns", prompt)
+        self.assertIn("Panel 5 (Center): [中景 / 平视]", prompt)
+        self.assertIn("ABSOLUTE NO-TEXT RULE", prompt)
+        self.assertEqual(len([l for l in prompt.splitlines() if re.match(r"^Panel \d+ \(", l)]), 9)
+
+    def test_crop_grid_panels(self):
+        import tempfile
+        from PIL import Image
+        from bigbanana_visual import crop_grid_panels
+        payload = {"panel_count": 9, "rows": 3, "cols": 3,
+                   "panels": [{"index": i, "shot_size": "中景", "camera_angle": "平视", "description": "x"} for i in range(9)]}
+        tmpdir = Path(tempfile.mkdtemp())
+        img = Image.new("RGB", (900, 900))
+        for i in range(9):
+            color = ((i * 30) % 255, (i * 60) % 255, (i * 90) % 255)
+            for x in range(i % 3 * 300, i % 3 * 300 + 300):
+                for y in range(i // 3 * 300, i // 3 * 300 + 300):
+                    img.putpixel((x, y), color)
+        grid_path = tmpdir / "grid.png"
+        img.save(grid_path)
+        out = crop_grid_panels(str(grid_path), [3], payload, tmpdir / "crops")
+        cropped = Image.open(out[0])
+        self.assertEqual(cropped.size, (300, 300))
+        self.assertEqual(cropped.getpixel((10, 10)), img.getpixel((10, 310)))
+
 if __name__ == "__main__": unittest.main()

@@ -217,10 +217,98 @@ video_prompt（视频动作提示词，用于图生视频模型）：
 剧本 JSON:
 {script}"""
 
-GRID_PROMPT = """你是漫剧分镜导演。为镜头 {shot_id} 设计九种明显不同的构图方案。
-每个 panel 必须包含 angle、shot_size、character_position、action_focus、composition_prompt。
-返回 JSON：{{"shot_id":"{shot_id}","panels":[...],"recommended_panels":[1,2]}}。
-剧本 JSON：{script}"""
+GRID_LAYOUTS = {
+    # panel_count -> (rows, cols); six-panel swaps for portrait (9:16)
+    4: (2, 2),
+    6: (2, 3),
+    9: (3, 3),
+}
+GRID_PORTRAIT_LAYOUTS = {6: (3, 2)}
+GRID_POSITION_LABELS_2x3 = ["Top-Left", "Top-Center", "Top-Right", "Bottom-Left", "Bottom-Center", "Bottom-Right"]
+GRID_POSITION_LABELS_3x2 = ["Top-Left", "Top-Right", "Middle-Left", "Middle-Right", "Bottom-Left", "Bottom-Right"]
+GRID_POSITION_LABELS_9 = [
+    "Top-Left", "Top-Center", "Top-Right",
+    "Middle-Left", "Center", "Middle-Right",
+    "Bottom-Left", "Bottom-Center", "Bottom-Right",
+]
+GRID_POSITION_LABELS_4 = ["Top-Left", "Top-Right", "Bottom-Left", "Bottom-Right"]
+
+
+def resolve_grid_layout(panel_count: int, aspect: str = "16:9") -> dict:
+    """Mirrors AI-Director resolveStoryboardGridLayout."""
+    panel_count = panel_count if panel_count in GRID_LAYOUTS else 9
+    rows, cols = GRID_LAYOUTS[panel_count]
+    if aspect == "9:16" and panel_count in GRID_PORTRAIT_LAYOUTS:
+        rows, cols = GRID_PORTRAIT_LAYOUTS[panel_count]
+    if panel_count == 9:
+        positions = GRID_POSITION_LABELS_9
+    elif panel_count == 4:
+        positions = GRID_POSITION_LABELS_4
+    elif panel_count == 6:
+        positions = GRID_POSITION_LABELS_3x2 if (rows, cols) == (3, 2) else GRID_POSITION_LABELS_2x3
+    else:
+        positions = GRID_POSITION_LABELS_4
+    return {"panel_count": panel_count, "rows": rows, "cols": cols, "positions": positions,
+            "grid_layout": f"{cols}x{rows}"}
+
+
+def validate_grid_panels(payload, layout: dict) -> list[dict]:
+    """Panels must be exactly N, unique index 0..N-1, non-empty fields."""
+    if not isinstance(payload, dict) or not isinstance(payload.get("panels"), list):
+        raise ValueError("顶层必须为 {\"panels\":[...]} 且 panels 为数组")
+    panels = payload["panels"]
+    expected = layout["panel_count"]
+    if len(panels) != expected:
+        raise ValueError(f"panels 必须恰好 {expected} 项，收到 {len(panels)} 项")
+    seen = set()
+    for panel in panels:
+        if not isinstance(panel, dict):
+            raise ValueError("panels 每项必须为对象")
+        index = panel.get("index")
+        if not isinstance(index, int) or not 0 <= index < expected:
+            raise ValueError(f"index 必须为 0-{expected - 1} 的整数")
+        if index in seen:
+            raise ValueError(f"index {index} 重复")
+        seen.add(index)
+        for field in ("shot_size", "camera_angle", "description"):
+            if not str(panel.get(field) or "").strip():
+                raise ValueError(f"index {index} 缺少非空 {field}")
+    return panels
+
+
+GRID_PROMPT_PROMPT = """你是专业分镜师。请把同一镜头拆成 @@panel_count@@ 个不重复视角，用于一张 @@grid_layout@@ 网格分镜图（一次生成一张图，格子画在同一张图内）。保持同一场景与角色连续性。
+
+请将以下镜头动作拆解为 @@panel_count@@ 个不同的摄影视角。
+网格硬约束：必须严格为 @@layout_instruction@@，顺序为从左到右、从上到下。@@layout_specific_constraint@@
+行列顺序示意：@@layout_example@@
+【镜头动作】@@action@@
+【场景信息】@@scene@@
+【角色】@@characters@@
+【视觉风格】@@style@@
+
+输出规则（只输出JSON）：
+1) 顶层为 {"panels":[...]}
+2) panels 必须恰好 @@panel_count@@ 项；每项必须显式包含 index 字段，index=0-@@last_index@@，不可重复，整体顺序为左到右、上到下
+3) 每项含 shot_size、camera_angle、description，均不能为空
+4) shot_size/camera_angle 用简短中文；description 用英文单句（10-30词），聚焦主体、动作、构图
+5) 视角多样性：shot_size + camera_angle 组合不得重复；@@min_shot_sizes_rule@@
+6) 叙事节奏：index=0 建立场景与主体，最后一格呈现动作结果/情绪落点，中间格逐步推进动作
+7) 连续性：保持角色外观、服装、道具、主运动方向一致；若需要反打/轴线跨越，必须在 description 明确说明动机
+
+输出 JSON：{"panels":[{"index":0,"shot_size":"中景","camera_angle":"平视","description":"English sentence"}]}
+
+镜头 JSON：
+@@shot_json@@"""
+
+GRID_REPAIR_SUFFIX = """
+
+你上一次输出不符合要求（原因：@@reason@@）。
+请严格重新输出 JSON 对象，且必须满足：
+1) "panels" 恰好 @@panel_count@@ 个，且每项必须包含唯一 index（0-@@last_index@@）
+2) 每个 panel 必须包含非空的 shot_size、camera_angle、description
+3) description 使用英文单句，严格控制在 10-30 词
+4) shot_size + camera_angle 组合不得重复，且 shot_size 至少包含 @@min_shot_sizes@@ 种
+5) 只输出 JSON，不要任何解释文字"""
 
 WARDROBE_PROMPT = """你是漫剧角色造型设计师。基于剧本角色，为每个角色设计可复用的衣橱状态变体。
 每个变体包含 character_name、name、story_usage、visual_changes、prompt，并继承角色脸型、发型和体态识别锚点。
@@ -290,8 +378,75 @@ def cmd_shot_prompts(args: argparse.Namespace) -> int:
 
 def cmd_grid_prompts(args: argparse.Namespace) -> int:
     script = read_script(args.script)
-    prompt = GRID_PROMPT.format(script=json.dumps(script, ensure_ascii=False), shot_id=args.shot)
-    write_json(args.out, chat_json(prompt, model=args.model, temperature=args.temperature, max_tokens=args.max_tokens))
+    shots = script.get("shots") if isinstance(script.get("shots"), list) else []
+    shot = next((s for s in shots if str(s.get("shot_id")) == str(args.shot)), None)
+    if shot is None:
+        raise AntskError(f"Shot {args.shot} not found in script JSON")
+    layout = resolve_grid_layout(args.panels, args.aspect)
+    min_sizes = 3 if layout["panel_count"] >= 6 else 2
+    scene_name = str(shot.get("scene") or "")
+    scene = next((s for s in script.get("scenes") or [] if str(s.get("name")) == scene_name), {})
+    scene_info = "、".join(
+        str(scene.get(k) or "") for k in ("name", "description", "time_of_day", "atmosphere") if scene.get(k)
+    ) or scene_name or "未指定"
+    template_args = {
+        "panel_count": layout["panel_count"],
+        "grid_layout": layout["grid_layout"],
+        "layout_instruction": f"exactly {layout['rows']} rows x {layout['cols']} columns",
+        "layout_example": "; ".join(
+            f"Row {r + 1}: panels {r * layout['cols'] + 1}-{(r + 1) * layout['cols']}"
+            for r in range(layout["rows"])
+        ),
+        "layout_specific_constraint": (
+            f"CRITICAL: {layout['panel_count']}-panel mode means exactly {layout['rows']} rows and "
+            f"{layout['cols']} columns for exactly {layout['panel_count']} panels total. "
+            "Never add extra rows, extra columns, blank extra boxes, missing panels, or merged panels."
+        ),
+        "min_shot_sizes_rule": f"当 {layout['panel_count']}>=6 时，至少使用 3 种不同 shot_size（否则至少 2 种）" if layout["panel_count"] >= 6 else "至少使用 2 种不同 shot_size",
+        "last_index": layout["panel_count"] - 1,
+        "min_shot_sizes": min_sizes,
+        "action": str(shot.get("action") or shot.get("actionSummary") or ""),
+        "scene": scene_info,
+        "characters": "、".join(str(c) for c in shot.get("characters") or []) or "无特定角色",
+        "style": normalize_style(script.get("style", "anime")),
+        "shot_json": json.dumps(shot, ensure_ascii=False),
+    }
+    prompt = GRID_PROMPT_PROMPT
+    for key, value in template_args.items():
+        prompt = prompt.replace(f"@@{key}@@", str(value))
+
+    # First parse; on validation failure retry once with explicit repair rules
+    # (mirrors the AI-Director auto-repair pass).
+    payload = None
+    reason = ""
+    for attempt in range(2):
+        attempt_prompt = prompt if not reason else (
+            prompt + GRID_REPAIR_SUFFIX
+            .replace("@@reason@@", reason)
+            .replace("@@panel_count@@", str(layout["panel_count"]))
+            .replace("@@last_index@@", str(layout["panel_count"] - 1))
+            .replace("@@min_shot_sizes@@", str(min_sizes))
+        )
+        raw = chat_completion(attempt_prompt, want_json=True, model=args.model,
+                              temperature=args.temperature if not reason else 0.4,
+                              max_tokens=args.max_tokens)
+        try:
+            candidate = parse_json_with_recovery(raw)
+            payload = {"panels": validate_grid_panels(candidate, layout)}
+            break
+        except ValueError as error:
+            reason = str(error)
+    if payload is None:
+        raise AntskError(f"九宫格视角拆分未通过校验：{reason}")
+    payload.update(
+        shot_id=args.shot,
+        panel_count=layout["panel_count"],
+        rows=layout["rows"],
+        cols=layout["cols"],
+        grid_layout=layout["grid_layout"],
+        positions=layout["positions"],
+    )
+    write_json(args.out, payload)
     return 0
 
 def cmd_wardrobe_prompts(args: argparse.Namespace) -> int:
