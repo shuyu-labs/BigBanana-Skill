@@ -153,6 +153,8 @@ SCRIPT_PROMPT = """你是资深短剧/漫剧编剧兼导演。把用户提供的
 要求：
 1. 语言：{lang}。视觉风格基调：{style_label}。单集目标时长约 {duration} 秒，按每镜头 4-10 秒拆分镜头。
 2. 角色 2-5 个、场景 2-5 个、道具按需；每个角色给出身份、外貌特征（发型/服装/体型，用于锁脸）、性格与口头禅。
+3. characters / scenes / props 每个元素必须有稳定 "id"（如 char_01、scene_01、prop_01），shots 通过 scene id 与 characters id 引用；
+   后续导演流水线按 id 做归属校验，缺 id 会导致对白/节拍校验全部失败。
 3. 镜头 (shots) 必须覆盖完整叙事闭环：开场钩子、冲突升级、转折、结尾悬念或收束。连续剧则结尾留钩子。
 4. 每个镜头包含：scene（场景名）、characters（出场角色名）、action（画面动作描述，具体可视）、dialogue（台词，可为空）、
    duration_seconds（4-10 的整数）、camera（景别+运镜，如"中景，缓慢推近"）。
@@ -165,11 +167,11 @@ SCRIPT_PROMPT = """你是资深短剧/漫剧编剧兼导演。把用户提供的
   "genre": "类型",
   "style": "{style_label}",
   "logline": "一句话故事",
-  "characters": [{{"name": "", "identity": "", "appearance": "", "personality": ""}}],
-  "scenes": [{{"name": "", "description": "", "time_of_day": "", "atmosphere": ""}}],
-  "props": [{{"name": "", "description": ""}}],
+  "characters": [{{"id": "char_01", "name": "", "identity": "", "appearance": "", "personality": ""}}],
+  "scenes": [{{"id": "scene_01", "name": "", "description": "", "time_of_day": "", "atmosphere": ""}}],
+  "props": [{{"id": "prop_01", "name": "", "description": ""}}],
   "shots": [
-    {{"shot_id": "S01", "scene": "", "characters": [], "props": [], "action": "", "dialogue": "", "narration": "",
+    {{"shot_id": "S01", "id": "shot_01", "scene": "scene_01", "characters": ["char_01"], "props": [], "action": "", "dialogue": "", "narration": "",
       "duration_seconds": 6, "camera": ""}}
   ]
 }}

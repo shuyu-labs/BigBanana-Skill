@@ -25,12 +25,13 @@ python <skill_dir>/scripts/antsk.py status
 
 ## 标准流程
 
-1. **剧本**：创意 → 结构化剧本；先让用户审核剧情、角色、镜头数和预计时长。
-2. **视觉设定**：生成角色定妆照、场景图、道具图；为实体保留稳定 ID。
-3. **镜头设计**：生成首帧提示词和视频动作提示词；构图不写运镜，视频提示词不重复静态外观。
-4. **构图选择**：不确定机位时先生成九宫格，人工选择 panel 后生成首帧。
-5. **生成**：首帧必须绑定当前镜头的角色/场景/道具参考图；模型支持时可绑定尾帧。
-6. **配音与交付**：生成旁白/对白，运行离线质量检查，再导出素材包、字幕和成片。
+1. **剧本**：创意 → 结构化剧本；先让用户审核剧情、角色、镜头数和预计时长。剧本 JSON 的 characters / scenes / props 每个元素必须带稳定 `id`（scene_01 等），shots 用 id 引用场景与角色——导演流水线按 id 做归属校验，只有 name 会导致校验全部失败。
+2. **导演分镜（推荐）**：`director` 命令跑四阶段流水线——节拍抽取 → 镜头预算 → 分场景镜头扩写 → 质检修订（含对白逐字保留、说话者绑定、连续性状态、道具时序、质量报告）。输出与项目 schema 兼容的 shots（含 start_frame_prompt / video_prompt），直接接后续生成。
+3. **视觉设定**：生成角色定妆照、场景图、道具图；为实体保留稳定 ID。
+4. **镜头设计**：不用导演流水线时，用 `shot-prompts` 生成首帧提示词和视频动作提示词；构图不写运镜，视频提示词不重复静态外观。
+5. **构图选择**：不确定机位时先生成九宫格，人工选择 panel 后生成首帧。
+6. **生成**：首帧必须绑定当前镜头的角色/场景/道具参考图；模型支持时可绑定尾帧。
+7. **配音与交付**：生成旁白/对白，运行离线质量检查，再导出素材包、字幕和成片。
 
 批量生成前必须执行 `plan` 并取得用户确认；用 `--max-shots` 先验证代表性镜头。`run --approve` 是付费批量生成的显式门禁。
 
@@ -45,6 +46,13 @@ python scripts/bigbanana_workflow.py run --out-dir ./episode --approve
 python scripts/bigbanana_generate.py script --idea "..." --out script.json
 python scripts/bigbanana_generate.py asset-prompts --script script.json --kind character --out character_prompts.json
 python scripts/bigbanana_generate.py shot-prompts --script script.json --out shots.json
+
+# 导演分镜流水线（节拍 -> 预算 -> 分场景扩写 -> 质检修订 -> 质量报告）
+# 入口会自动 normalize 补齐缺失 id 并写回 script.json；手改剧本后无需手动补 ID
+python scripts/bigbanana_director.py direct --script script.json --source novel.txt \
+    --duration 60 --shot-seconds 8 --out director_shots.json --report director_report.json
+# 质量报告 dialogueCoverage / beatCoverage / characterBindingRate 未达 100% 时，
+# 先按 continuityRisks 修复或重跑，不要带着缺口进入关键帧阶段
 
 # 九宫格和衣橱
 python scripts/bigbanana_generate.py grid-prompts --script script.json --shot S01 --out grid_s01.json

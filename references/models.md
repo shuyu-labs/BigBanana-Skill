@@ -39,12 +39,14 @@
 | `doubao-seedance-2-5` | 5-15 | ✅ | — | ✅(≤4) | ❌ | AntSK 多参考图异步模型，能力对齐 Seedance 2.0 |
 | `happyhorse-1.0` / `-1.1` | 5-15 | ✅ | — | ✅(≤4) | ✅ | 约 1.5$/s，昂贵 |
 | `bigbanana-2.0-fast-cheep` | 5-15 | ✅ | — | ✅(≤4) | ❌ | JSON images 载荷，能力对齐 Seedance 2.0 Fast |
+| `bigbanana-2.5` | **固定 30** | ✅ | — | ✅(≤30) | ❌ | 标准 JSON 载荷（duration+aspect_ratio），720p；脚本自动把非 30 秒请求校准为 30 秒 |
 | `viduq3-turbo` | 5-16 | ✅ | ✅ | ❌ | ✅ | JSON 载荷，必须首帧；按次计费，质量优先 |
 | `viduq3-pro` | 5-16 | ✅ | ✅ | ❌ | ✅ | JSON 载荷，必须首帧；按次计费，价格非常高，关键镜头用 |
 
 说明：
 - 多参考图模型（doubao-2.0 / happyhorse / gemini-omni reference 模式）需要用紧凑 `@1：说明` 语法标注每张参考图用途，脚本 `--annotation` 参数会自动注入。
 - `bigbanana-2.0-fast-cheep` 使用 JSON images 载荷（脚本已处理），一般无需直接使用。
+- `bigbanana-2.5` 固定 30 秒 / 720p / 最多 30 张参考图，走标准 JSON 字段（`duration` 整数 + `aspect_ratio`），注意与 2.0 的 `size:"16*9"` 载荷不同；生成耗时长，轮询上限沿用 30 分钟。
 - 不支持真人的模型收到真人内容请求会失败或被风控：选 `veo_3_1-fast`、`viduq3-*`、`happyhorse-*`。
 
 ## BigBanana 中存在、但不经 AntSK 的视频模型（本 skill 不覆盖）

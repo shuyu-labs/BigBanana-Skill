@@ -17,6 +17,8 @@ services/videoModelCapabilities.ts):
   happyhorse-1.x           compact @1：@2： annotations injected, end frame dropped
   bigbanana-2.0-fast-cheep json-images payload (size '16*9' + width/height),
                            same compact annotations
+  bigbanana-2.5            standard JSON payload (duration int + aspect_ratio),
+                           fixed 30s, up to 30 reference images
   viduq3-* / vidu-q3-*     JSON payload {model, prompt, duration, images[], metadata}
                            start frame required, refs ignored, Q3 enables audio
 
@@ -78,8 +80,15 @@ DOUBAO_REFERENCE_MODELS = {
     "doubao-seedance-2-5",
     "happyhorse-1.0",
     "happyhorse-1.1",
+    # AntSK bigbanana-2.5 shares the multi-reference contract (start frame +
+    # refs, end frame dropped, compact annotations), max 30 images, fixed 30s.
+    "bigbanana-2.5",
 }
 DOUBAO_JSON_REFERENCE_MODELS = {"bigbanana-2.0-fast-cheep"}
+# Mirrors sora-api.js STANDARD_JSON_VIDEO_MODELS: bigbanana-2.5 uses the
+# standard JSON fields (duration int + aspect_ratio) instead of the
+# bigbanana-2.0 'size 16*9' variant.
+STANDARD_JSON_VIDEO_MODELS = {"bigbanana-2.5"}
 GEMINI_OMNI_MODEL_ID = "gemini-omni-flash"
 VEO_FAST_MODEL_ID = "veo_3_1-fast"
 LEGACY_VEO_ALIASES = {"veo", "veo-3.1", "veo_3_1", "veo-r2v"}
@@ -87,6 +96,7 @@ LEGACY_VEO_ALIASES = {"veo", "veo-3.1", "veo_3_1", "veo-r2v"}
 MAX_DOUBAO_START_END_IMAGES = 2      # MAX_DOUBAO_SEEDANCE_START_END_INPUT_IMAGES
 MAX_DOUBAO_REFERENCE_IMAGES = 4      # MAX_DOUBAO_SEEDANCE_REFERENCE_INPUT_IMAGES
 MAX_GEMINI_OMNI_REFERENCE_IMAGES = 4  # MAX_GEMINI_OMNI_REFERENCE_INPUT_IMAGES
+MAX_BIGBANANA_2_5_REFERENCE_IMAGES = 30  # MAX_IMAGES_BIGBANANA_2_5
 
 # Mirrors types/model.ts DEFAULT_VIDEO_PARAMS_* supportedDurations.
 MODEL_DURATIONS = {
@@ -103,6 +113,8 @@ MODEL_DURATIONS = {
     "happyhorse-1.0": list(range(5, 16)),
     "happyhorse-1.1": list(range(5, 16)),
     "bigbanana-2.0-fast-cheep": list(range(5, 16)),
+    # bigbanana-2.5 is fixed at 30 seconds (sora-api.js MODEL_DURATION_LIMITS).
+    "bigbanana-2.5": [30],
     "viduq3-turbo": list(range(5, 17)),
     "viduq3-pro": list(range(5, 17)),
 }
@@ -378,6 +390,35 @@ def create_task_json_images(
     return extract_task_id(payload)
 
 
+def create_task_standard_json(
+    model: str,
+    prompt: str,
+    seconds: int,
+    aspect: str,
+    reference_items: list[dict],
+    token: str,
+) -> str:
+    """Mirrors sora-api.js STANDARD_JSON_VIDEO_MODELS branch (bigbanana-2.5)."""
+    encoded: list[str] = []
+    for item in reference_items:
+        blob, _mime = load_image_bytes(item["image"])
+        encoded.append(f"data:image/png;base64,{base64.b64encode(blob).decode('ascii')}")
+
+    body: dict = {
+        "model": model,
+        "prompt": prompt,
+        "duration": int(seconds),
+        "aspect_ratio": aspect,
+    }
+    if encoded:
+        body["images"] = encoded
+
+    payload = api_request_json(
+        "/v1/videos", method="POST", token=token, body=body, timeout=CREATE_TIMEOUT_SECONDS
+    )
+    return extract_task_id(payload)
+
+
 def create_task_vidu_json(
     model: str,
     prompt: str,
@@ -619,7 +660,17 @@ def run_generate(args: argparse.Namespace) -> int:
     token = require_token()
     model = normalize_model(args.model)
     family = resolve_family(model)
-    validate_duration(model, args.seconds)
+
+    # Fixed-duration models (e.g. bigbanana-2.5 -> 30s): coerce instead of
+    # erroring, mirroring sora-api.js getValidDuration.
+    allowed_durations = MODEL_DURATIONS.get(model)
+    seconds = int(args.seconds)
+    if allowed_durations and len(allowed_durations) == 1 and seconds != allowed_durations[0]:
+        print(f"Capability routing: {model} is fixed at {allowed_durations[0]} seconds. "
+              f"Requested {seconds}s will be replaced with {allowed_durations[0]}s.",
+              file=sys.stderr)
+        seconds = allowed_durations[0]
+    validate_duration(model, seconds)
     validate_aspect(model, args.aspect)
 
     start_image = args.start
@@ -662,6 +713,9 @@ def run_generate(args: argparse.Namespace) -> int:
         include_all = is_reference_model
         inject_annotations = is_reference_model
         max_images = MAX_DOUBAO_REFERENCE_IMAGES if is_reference_model else MAX_DOUBAO_START_END_IMAGES
+        if model in STANDARD_JSON_VIDEO_MODELS:
+            # bigbanana-2.5: multi-reference up to 30 images (MAX_IMAGES_BIGBANANA_2_5).
+            max_images = MAX_BIGBANANA_2_5_REFERENCE_IMAGES
         if is_reference_model and end_image:
             print(f"Capability routing: {model} only supports start-frame + references. "
                   "End-frame reference will be ignored.", file=sys.stderr)
@@ -691,17 +745,21 @@ def run_generate(args: argparse.Namespace) -> int:
 
     if family == "vidu":
         task_id = create_task_vidu_json(
-            model, final_prompt, args.seconds, start_image, end_image, token
+            model, final_prompt, seconds, start_image, end_image, token
+        )
+    elif model in STANDARD_JSON_VIDEO_MODELS:
+        task_id = create_task_standard_json(
+            model, final_prompt, seconds, args.aspect, reference_items, token
         )
     elif model in DOUBAO_JSON_REFERENCE_MODELS:
         task_id = create_task_json_images(
-            model, final_prompt, args.seconds, args.aspect, reference_items, token
+            model, final_prompt, seconds, args.aspect, reference_items, token
         )
     else:
         task_id = create_task_form(
             model,
             final_prompt,
-            args.seconds,
+            seconds,
             args.aspect,
             reference_items,
             reference_mode,

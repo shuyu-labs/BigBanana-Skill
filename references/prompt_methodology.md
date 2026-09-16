@@ -81,3 +81,33 @@ doubao-seedance-2.0 / happyhorse / gemini-omni(reference) 等多图模型用：
 - 叙事闭环：3 秒内钩子 → 冲突升级 → 转折 → 结尾悬念（连续剧）或收束（单集）。
 - 场景连续性：相邻镜头同场景时，首帧提示词必须继承上一镜头的光线与机位逻辑，或明确写出转场。
 - 台词与口型：video_prompt 末尾附"台词：xxx"，配音用 dialogue 模式；旁白用 narration 模式独立生成。
+
+## 7. 导演流水线（bigbanana_director.py，源自 AI-Director directorAgentService）
+
+`script` + `shot-prompts` 是两步一次性生成；导演流水线把拆分升级为可质检的闭环：
+
+```
+原文（分块 12k 字符，跨块携带出口状态）
+  → ① 剧本分析：dialogueLines（逐字台词+说话者） + storyBeats（节拍）
+  → ② 节拍规划：每场镜头预算（仅参考值）
+  → ③ 分场景镜头扩写：动作 + 对白绑定 + 连续性进出状态 + 首尾帧提示词
+  → ④ 质检修订（≤2 轮）：issues+patch → 规则复检 → 质量报告
+```
+
+核心概念：
+
+- **节拍（beat）**：叙事最小单元，purpose ∈ setup / conflict / escalation / reaction / result / hook；
+  每拍带 sourceText（原文依据）与 entryState / exitState（连续性进出状态）。
+- **对白逐字保留**：台词不得概括删改；每镜一个说话者；旁白/画外音单独识别；
+  模型漏掉的台词从原文正则兜底恢复（`角色：台词` 与引号对白）。
+- **镜头预算是软约束**：关键动作、道具状态变化、对白后的反应、结尾钩子必须独立成镜；纯过渡可合并。
+- **节拍覆盖对齐是单调的**：后一镜不能偷取前一号节拍（集合式分配会打断闪回证据链和道具交接）；
+  缺拍时本地补一枚 fallback 镜头而不是丢弃整轮结果。
+- **角色解析不做子串猜测**：`小林` 不能绑到 `林`；解析不了的名字必须报错修复，不许猜成别的资产。
+- **道具时序**：道具最早出现在其首次出现的节拍；更早镜头上的绑定会被剥掉（宁可少绑，不可穿越）。
+- **质量报告**：dialogueCoverage（对白覆盖率）/ beatCoverage（节拍覆盖率）/ characterBindingRate（角色绑定率）
+  / duplicateShotCount / continuityRisks / score（25/25/25/15/10 加权）。
+  三项覆盖未满 100% 或存在 duplicate 时不进入关键帧阶段。
+
+规则检查与修订补丁在本地代码执行，不信任模型自评：patch 只接受非空字段、beatId 必须同场景、
+改动作必须同步首尾关键帧，空占位字段不能抹掉已写好的台词或视觉状态。

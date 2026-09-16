@@ -103,6 +103,15 @@ POST /v1/videos
 ```
 size 分隔符为 `*`，并携带宽高比数字 width/height。
 
+创建（标准 JSON 字段，bigbanana-2.5 专用）：
+```
+POST /v1/videos
+{ "model":"bigbanana-2.5", "prompt":"...", "duration":30, "aspect_ratio":"16:9",
+  "images":["data:image/png;base64,..."] }
+```
+duration 为整数且**固定 30 秒**（脚本自动把其他时长校准为 30）；aspect_ratio 为 `16:9` / `9:16`；
+images 可选（最多 30 张 data URL），无参考图时省略 images 字段。
+
 创建（JSON 载荷，viduq3-* / vidu-q3-* 专用）：
 ```
 POST /v1/videos
